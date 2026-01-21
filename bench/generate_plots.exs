@@ -3,16 +3,29 @@
 # Run with: mix run bench/generate_plots.exs
 #
 # This generates CSV data that can be plotted with the Python script
+#
+# For MPS benchmarks, ensure torchx is installed:
+#   mix deps.get
 
 IO.puts("ExMaxsimCpu vs Nx Benchmark Data Generator")
 IO.puts("==========================================\n")
 
 defmodule BenchHelper do
-  def random_normalized(shape) do
+  # Suppress compile warnings for optional Torchx
+  @compile {:no_warn_undefined, Torchx}
+
+  def random_normalized(shape, backend \\ Nx.BinaryBackend) do
     key = Nx.Random.key(System.unique_integer([:positive]))
     {tensor, _key} = Nx.Random.normal(key, shape: shape, type: :f32)
     norms = Nx.sqrt(Nx.sum(Nx.pow(tensor, 2), axes: [-1], keep_axes: true))
-    Nx.divide(tensor, norms)
+    result = Nx.divide(tensor, norms)
+
+    # Transfer to specified backend if different
+    if backend != Nx.BinaryBackend do
+      Nx.backend_transfer(result, backend)
+    else
+      result
+    end
   end
 
   def measure_time(fun, iterations \\ 5) do
@@ -27,14 +40,36 @@ defmodule BenchHelper do
 
     Enum.sum(times) / length(times)
   end
+
+  def torchx_mps_backend do
+    with true <- Code.ensure_loaded?(Torchx),
+         {:ok, _apps} <- Application.ensure_all_started(:torchx),
+         true <- mps_available?() do
+      {Torchx.Backend, device: :mps}
+    else
+      _ -> nil
+    end
+  end
+
+  defp mps_available? do
+    # Use Torchx's built-in device availability check
+    try do
+      Code.ensure_loaded?(Torchx) and Torchx.device_available?(:mps)
+    rescue
+      _ -> false
+    end
+  end
+
+  def sync_gpu do
+    # Force GPU synchronization by materializing output
+    :ok
+  end
 end
 
 defmodule NxReference do
   @moduledoc """
   Optimized pure Nx MaxSim implementation using batched operations.
-
-  This is the fair baseline for comparison - uses vectorized batch dot
-  product instead of sequential Enum.map.
+  Works with any Nx backend (BinaryBackend, Torchx, etc.)
   """
 
   def maxsim_scores(query, docs) do
@@ -51,7 +86,6 @@ defmodule NxReference do
     query_b = Nx.broadcast(query, {n_docs, q_len, dim})
 
     # Batched matmul: {n_docs, q_len, dim} x {n_docs, dim, d_len} -> {n_docs, q_len, d_len}
-    # Contract over dim (axis 2 of query_b, axis 1 of docs_t), batch over n_docs (axis 0)
     sim = Nx.dot(query_b, [2], [0], docs_t, [1], [0])
 
     # MaxSim: for each query token, take max over doc tokens, then sum over query tokens
@@ -61,15 +95,26 @@ defmodule NxReference do
   end
 end
 
+# Check for MPS availability
+mps_backend = BenchHelper.torchx_mps_backend()
+
+if mps_backend do
+  IO.puts("✓ Torchx MPS backend available - will benchmark GPU acceleration")
+else
+  IO.puts("⚠ Torchx MPS not available - skipping GPU benchmarks")
+  IO.puts("  (Install torchx and run on Apple Silicon for MPS benchmarks)")
+end
+
+IO.puts("")
+
 # Benchmark configurations
-# Only include values where we can run both ExMaxsimCpu AND Nx reference
-# (Nx is too slow for larger configs, so we limit to values where comparison is feasible)
+# Only include values where we can run comparisons without timeout
 configs = [
-  # Varying number of documents (limit to 100 for Nx comparison)
+  # Varying number of documents
   %{name: "n_docs", param: :n_docs, values: [10, 25, 50, 100], q_len: 32, d_len: 64, dim: 128},
-  # Varying document length (limit to 128 for Nx comparison)
+  # Varying document length
   %{name: "d_len", param: :d_len, values: [32, 64, 128], q_len: 32, n_docs: 50, dim: 128},
-  # Varying dimension (limit to 256 for Nx comparison)
+  # Varying dimension
   %{name: "dim", param: :dim, values: [64, 128, 256], q_len: 32, n_docs: 50, d_len: 64},
 ]
 
@@ -88,41 +133,102 @@ results =
 
       IO.write("  #{config.param}=#{value}... ")
 
-      query = BenchHelper.random_normalized({params.q_len, params.dim})
-      docs = BenchHelper.random_normalized({params.n_docs, params.d_len, params.dim})
+      # Generate data on BinaryBackend first
+      query_bin = BenchHelper.random_normalized({params.q_len, params.dim})
+      docs_bin = BenchHelper.random_normalized({params.n_docs, params.d_len, params.dim})
 
-      # Measure ExMaxsimCpu
-      ex_time = BenchHelper.measure_time(fn -> ExMaxsimCpu.maxsim_scores(query, docs) end, 10)
+      # Measure ExMaxsimCpu (uses BinaryBackend tensors, converts internally)
+      ex_time = BenchHelper.measure_time(fn ->
+        ExMaxsimCpu.maxsim_scores(query_bin, docs_bin)
+      end, 10)
 
-      # Measure Nx reference
-      nx_time = BenchHelper.measure_time(fn -> NxReference.maxsim_scores(query, docs) end, 3)
+      # Measure Nx BinaryBackend
+      nx_time = BenchHelper.measure_time(fn ->
+        result = NxReference.maxsim_scores(query_bin, docs_bin)
+        _ = Nx.to_binary(result)  # Force materialization
+        :ok
+      end, 3)
 
-      speedup = nx_time / ex_time
+      # Measure Nx with MPS backend (if available)
+      {mps_time, mps_transfer_time} =
+        if mps_backend do
+          # Pre-transfer data to GPU
+          query_mps = Nx.backend_transfer(query_bin, mps_backend)
+          docs_mps = Nx.backend_transfer(docs_bin, mps_backend)
 
-      IO.puts("ExMaxsim: #{Float.round(ex_time, 2)}ms, Nx: #{Float.round(nx_time, 2)}ms, Speedup: #{Float.round(speedup, 1)}x")
+          # Warmup GPU
+          _ = NxReference.maxsim_scores(query_mps, docs_mps) |> Nx.to_binary()
+
+          # Compute-only time (data already on GPU)
+          compute_time = BenchHelper.measure_time(fn ->
+            result = NxReference.maxsim_scores(query_mps, docs_mps)
+            _ = Nx.to_binary(result)  # Force sync
+            :ok
+          end, 5)
+
+          # End-to-end time (including transfer)
+          e2e_time = BenchHelper.measure_time(fn ->
+            q = Nx.backend_transfer(query_bin, mps_backend)
+            d = Nx.backend_transfer(docs_bin, mps_backend)
+            result = NxReference.maxsim_scores(q, d)
+            _ = Nx.to_binary(result)
+            :ok
+          end, 3)
+
+          {compute_time, e2e_time}
+        else
+          {nil, nil}
+        end
+
+      # Calculate speedups
+      speedup_vs_nx = nx_time / ex_time
+      speedup_vs_mps = if mps_time, do: mps_time / ex_time, else: nil
+
+      # Print results
+      mps_str = if mps_time, do: ", MPS: #{Float.round(mps_time, 2)}ms", else: ""
+      IO.puts("ExMaxsim: #{Float.round(ex_time, 2)}ms, Nx: #{Float.round(nx_time, 2)}ms#{mps_str}")
 
       %{
         config: config.name,
         param_value: value,
         ex_time_ms: ex_time,
         nx_time_ms: nx_time,
-        speedup: speedup
+        mps_time_ms: mps_time,
+        mps_transfer_time_ms: mps_transfer_time,
+        speedup_vs_nx: speedup_vs_nx,
+        speedup_vs_mps: speedup_vs_mps
       }
     end
   end)
 
 # Write CSV
 csv_path = "assets/benchmark_data.csv"
+csv_header = "config,param_value,ex_time_ms,nx_time_ms,mps_time_ms,mps_transfer_time_ms,speedup_vs_nx,speedup_vs_mps"
+
 csv_content =
-  ["config,param_value,ex_time_ms,nx_time_ms,speedup"] ++
+  [csv_header] ++
   Enum.map(results, fn r ->
-    "#{r.config},#{r.param_value},#{Float.round(r.ex_time_ms, 4)},#{Float.round(r.nx_time_ms, 4)},#{Float.round(r.speedup, 2)}"
+    mps_time = if r.mps_time_ms, do: Float.round(r.mps_time_ms, 4), else: ""
+    mps_transfer = if r.mps_transfer_time_ms, do: Float.round(r.mps_transfer_time_ms, 4), else: ""
+    speedup_mps = if r.speedup_vs_mps, do: Float.round(r.speedup_vs_mps, 2), else: ""
+
+    "#{r.config},#{r.param_value},#{Float.round(r.ex_time_ms, 4)},#{Float.round(r.nx_time_ms, 4)},#{mps_time},#{mps_transfer},#{Float.round(r.speedup_vs_nx, 2)},#{speedup_mps}"
   end)
 
 File.write!(csv_path, Enum.join(csv_content, "\n"))
 IO.puts("\n\nBenchmark data written to #{csv_path}")
 
-# Also output a summary
+# Summary
 IO.puts("\n=== Summary ===")
-IO.puts("ExMaxsimCpu is consistently 100-15000x faster than pure Nx depending on configuration.")
-IO.puts("Run `python3 bench/plot_benchmarks.py` to generate plots.")
+avg_speedup_nx = Enum.sum(Enum.map(results, & &1.speedup_vs_nx)) / length(results)
+IO.puts("Average speedup vs Nx (BinaryBackend): #{Float.round(avg_speedup_nx, 0)}x")
+
+if mps_backend do
+  mps_results = Enum.filter(results, & &1.speedup_vs_mps)
+  if length(mps_results) > 0 do
+    avg_speedup_mps = Enum.sum(Enum.map(mps_results, & &1.speedup_vs_mps)) / length(mps_results)
+    IO.puts("Average speedup vs Nx (MPS GPU): #{Float.round(avg_speedup_mps, 1)}x")
+  end
+end
+
+IO.puts("\nRun `uv run bench/plot_benchmarks.py` to generate plots.")

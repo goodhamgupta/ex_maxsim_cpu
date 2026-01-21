@@ -31,6 +31,7 @@ defmodule ExMaxsimCpu.MixProject do
     [
       {:rustler, "~> 0.37.0"},
       {:nx, "~> 0.7", optional: true},
+      {:torchx, "~> 0.7", optional: true},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:benchee, "~> 1.0", only: :dev}
     ]

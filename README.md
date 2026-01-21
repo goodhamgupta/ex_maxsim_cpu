@@ -138,9 +138,18 @@ For additional performance on Intel CPUs, you can enable libxsmm:
 
 ## Benchmarks
 
-ExMaxsimCpu is **4,500-22,000x faster** than a pure Nx implementation (using the default BinaryBackend) thanks to optimized BLAS and SIMD operations.
+ExMaxsimCpu delivers exceptional performance across all comparison points:
 
-> **Note:** The Nx reference uses an optimized vectorized implementation with batched `dot` operations - not a naive sequential loop. The speedup comes from ExMaxsimCpu's use of native BLAS libraries (Accelerate/OpenBLAS) and SIMD instructions.
+| Comparison | Speedup |
+|------------|---------|
+| vs Nx BinaryBackend | **~13,000x faster** |
+| vs Nx + Torchx MPS (GPU) | **~14x faster** |
+
+> **Note:** All Nx implementations use optimized vectorized code with batched `dot` operations. The speedup comes from ExMaxsimCpu's use of native BLAS libraries (Accelerate/OpenBLAS) and hand-tuned SIMD instructions (AVX2/NEON).
+
+### Three-Way Performance Comparison
+
+![Three-Way Comparison](assets/benchmark_three_way.png)
 
 ### Performance Summary
 
