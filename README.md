@@ -138,26 +138,39 @@ For additional performance on Intel CPUs, you can enable libxsmm:
 
 ## Benchmarks
 
-ExMaxsimCpu delivers exceptional performance across all comparison points:
+ExMaxsimCpu delivers exceptional performance, **even outperforming GPU-accelerated alternatives**:
 
-| Comparison | Speedup |
-|------------|---------|
-| vs Nx BinaryBackend | **~13,000x faster** |
-| vs Nx + Torchx MPS (GPU) | **~14x faster** |
+### Performance Summary
 
-> **Note:** All Nx implementations use optimized vectorized code with batched `dot` operations. The speedup comes from ExMaxsimCpu's use of native BLAS libraries (Accelerate/OpenBLAS) and hand-tuned SIMD instructions (AVX2/NEON).
+| Implementation | Typical Latency | vs ExMaxsimCpu |
+|---------------|-----------------|----------------|
+| **ExMaxsimCpu** (BLAS+SIMD) | 0.09 - 0.28 ms | — |
+| Nx + Torchx MPS (Apple GPU) | 0.86 - 4.43 ms | ~14x slower |
+| Nx BinaryBackend (pure Elixir) | 426 - 5,842 ms | ~13,000x slower |
+
+> **Key insight:** ExMaxsimCpu is faster than GPU acceleration! The combination of optimized BLAS (Accelerate/OpenBLAS) and hand-tuned SIMD (AVX2/NEON) outperforms even Apple's Metal Performance Shaders.
 
 ### Three-Way Performance Comparison
 
 ![Three-Way Comparison](assets/benchmark_three_way.png)
 
-### Performance Summary
+*Benchmark on Apple M4 Pro, showing ExMaxsimCpu (blue) vs Nx+MPS GPU (green) vs Nx BinaryBackend (orange) on a log scale.*
 
-![Benchmark Summary](assets/benchmark_summary.png)
+### Speedup Analysis
 
-### Speedup by Configuration
+| Comparison | Speedup Factor |
+|------------|----------------|
+| vs Nx BinaryBackend | **4,000x - 19,000x** |
+| vs Nx + Torchx MPS (GPU) | **6x - 29x** |
 
 ![Speedup Comparison](assets/benchmark_speedup.png)
+
+### Why is CPU faster than GPU?
+
+1. **Optimized BLAS**: Uses Apple Accelerate (or OpenBLAS on Linux) which is highly tuned for the CPU architecture
+2. **SIMD Instructions**: Hand-optimized AVX2/NEON code for max-reduction operations
+3. **No Transfer Overhead**: GPU implementations incur memory transfer costs
+4. **Cache Efficiency**: Tiled algorithms keep data in CPU cache
 
 ### Detailed Comparisons
 
@@ -177,15 +190,17 @@ ExMaxsimCpu delivers exceptional performance across all comparison points:
 
 ### Running Benchmarks
 
-Generate benchmark data:
+Generate benchmark data (includes MPS GPU comparison on Apple Silicon):
 ```bash
 OPENBLAS_NUM_THREADS=1 mix run bench/generate_plots.exs
 ```
 
-Generate plots (requires Python with matplotlib):
+Generate plots:
 ```bash
 uv run bench/plot_benchmarks.py
 ```
+
+> **Note:** For MPS benchmarks, ensure `torchx` is installed. The benchmark automatically detects GPU availability.
 
 ## Platform Support
 
