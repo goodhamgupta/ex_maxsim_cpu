@@ -44,13 +44,15 @@ defmodule NxReference do
 end
 
 # Benchmark configurations
+# Only include values where we can run both ExMaxsimCpu AND Nx reference
+# (Nx is too slow for larger configs, so we limit to values where comparison is feasible)
 configs = [
-  # Varying number of documents
-  %{name: "n_docs", param: :n_docs, values: [10, 25, 50, 100, 200], q_len: 32, d_len: 64, dim: 128},
-  # Varying document length
-  %{name: "d_len", param: :d_len, values: [32, 64, 128, 256], q_len: 32, n_docs: 50, dim: 128},
-  # Varying dimension
-  %{name: "dim", param: :dim, values: [64, 128, 256, 512], q_len: 32, n_docs: 50, d_len: 64},
+  # Varying number of documents (limit to 100 for Nx comparison)
+  %{name: "n_docs", param: :n_docs, values: [10, 25, 50, 100], q_len: 32, d_len: 64, dim: 128},
+  # Varying document length (limit to 128 for Nx comparison)
+  %{name: "d_len", param: :d_len, values: [32, 64, 128], q_len: 32, n_docs: 50, dim: 128},
+  # Varying dimension (limit to 256 for Nx comparison)
+  %{name: "dim", param: :dim, values: [64, 128, 256], q_len: 32, n_docs: 50, d_len: 64},
 ]
 
 results =
@@ -74,17 +76,12 @@ results =
       # Measure ExMaxsimCpu
       ex_time = BenchHelper.measure_time(fn -> ExMaxsimCpu.maxsim_scores(query, docs) end, 10)
 
-      # Measure Nx (only for smaller configs to avoid timeout)
-      nx_time =
-        if params.n_docs <= 100 and params.d_len <= 128 and params.dim <= 256 do
-          BenchHelper.measure_time(fn -> NxReference.maxsim_scores(query, docs) end, 3)
-        else
-          nil
-        end
+      # Measure Nx reference
+      nx_time = BenchHelper.measure_time(fn -> NxReference.maxsim_scores(query, docs) end, 3)
 
-      speedup = if nx_time, do: nx_time / ex_time, else: nil
+      speedup = nx_time / ex_time
 
-      IO.puts("ExMaxsim: #{Float.round(ex_time, 2)}ms, Nx: #{if nx_time, do: Float.round(nx_time, 2), else: "N/A"}ms, Speedup: #{if speedup, do: "#{Float.round(speedup, 1)}x", else: "N/A"}")
+      IO.puts("ExMaxsim: #{Float.round(ex_time, 2)}ms, Nx: #{Float.round(nx_time, 2)}ms, Speedup: #{Float.round(speedup, 1)}x")
 
       %{
         config: config.name,
@@ -101,9 +98,7 @@ csv_path = "assets/benchmark_data.csv"
 csv_content =
   ["config,param_value,ex_time_ms,nx_time_ms,speedup"] ++
   Enum.map(results, fn r ->
-    nx_time = if r.nx_time_ms, do: Float.round(r.nx_time_ms, 4), else: ""
-    speedup = if r.speedup, do: Float.round(r.speedup, 2), else: ""
-    "#{r.config},#{r.param_value},#{Float.round(r.ex_time_ms, 4)},#{nx_time},#{speedup}"
+    "#{r.config},#{r.param_value},#{Float.round(r.ex_time_ms, 4)},#{Float.round(r.nx_time_ms, 4)},#{Float.round(r.speedup, 2)}"
   end)
 
 File.write!(csv_path, Enum.join(csv_content, "\n"))
