@@ -19,6 +19,8 @@ fn load(_env: Env, _info: Term) -> bool {
 
 rustler::init!("Elixir.ExMaxsimCpu.Nif", load = load);
 
+type DocData<'a> = Vec<(usize, Cow<'a, [f32]>)>;
+
 /// Convert a binary to &[f32], handling alignment.
 /// Returns Cow::Borrowed if aligned, Cow::Owned if copy was needed.
 fn binary_to_f32<'a>(bin: &'a Binary) -> Result<Cow<'a, [f32]>, &'static str> {
@@ -137,10 +139,10 @@ fn maxsim_scores_nif<'a>(
 #[rustler::nif(schedule = "DirtyCpu")]
 fn maxsim_scores_variable_nif<'a>(
     env: Env<'a>,
-    query_bin: Binary,
+    query_bin: Binary<'a>,
     q_len: usize,
     dim: usize,
-    doc_bins: Vec<Binary>,
+    doc_bins: Vec<Binary<'a>>,
     doc_lens: Vec<usize>,
 ) -> NifResult<Binary<'a>> {
     // Wrap in catch_unwind to prevent panics from crashing BEAM
@@ -163,7 +165,7 @@ fn maxsim_scores_variable_nif<'a>(
         let query = binary_to_f32(&query_bin).map_err(|e| e.to_string())?;
 
         // Convert document binaries and validate sizes
-        let doc_data: Result<Vec<(usize, Vec<f32>)>, String> = doc_bins
+        let doc_data: Result<DocData<'_>, String> = doc_bins
             .iter()
             .zip(doc_lens.iter())
             .enumerate()
@@ -179,8 +181,7 @@ fn maxsim_scores_variable_nif<'a>(
                 }
 
                 let data = binary_to_f32(bin).map_err(|e| e.to_string())?;
-                // Convert Cow to owned Vec for lifetime reasons
-                Ok((len, data.into_owned()))
+                Ok((len, data))
             })
             .collect();
 
@@ -189,7 +190,7 @@ fn maxsim_scores_variable_nif<'a>(
         // Create slice references for the algorithm
         let doc_slices: Vec<(usize, &[f32])> = doc_data
             .iter()
-            .map(|(len, data)| (*len, data.as_slice()))
+            .map(|(len, data)| (*len, data.as_ref()))
             .collect();
 
         // Compute scores

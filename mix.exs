@@ -1,14 +1,14 @@
 defmodule ExMaxsimCpu.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/mixedbread-ai/maxsim-cpu"
 
   def project do
     [
       app: :ex_maxsim_cpu,
       version: @version,
-      elixir: "~> 1.14",
+      elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: description(),
@@ -30,7 +30,7 @@ defmodule ExMaxsimCpu.MixProject do
   defp deps do
     [
       {:rustler, "~> 0.37.0"},
-      {:nx, "~> 0.7", optional: true},
+      {:nx, "~> 0.7"},
       {:torchx, "~> 0.7", optional: true},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:benchee, "~> 1.0", only: :dev}

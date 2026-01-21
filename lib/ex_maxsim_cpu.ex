@@ -40,6 +40,10 @@ defmodule ExMaxsimCpu do
 
   - `RAYON_NUM_THREADS`: Control Rayon parallelism (default: number of CPUs)
   - `OPENBLAS_NUM_THREADS`: Set to 1 to avoid oversubscription with Rayon
+
+  ## Input Requirements
+
+  - Embeddings must be L2-normalized per token for correct MaxSim scores
   """
 
   alias ExMaxsimCpu.Nif

@@ -35,13 +35,17 @@ end
 ### System Requirements
 
 - **macOS (Apple Silicon)**: Uses Accelerate framework (no additional setup needed)
-- **Linux x86_64**: Requires OpenBLAS and AVX2 support
+- **Linux x86_64**: Requires OpenBLAS; AVX2 is recommended for SIMD speedups
   ```bash
   # Ubuntu/Debian
   sudo apt-get install libopenblas-dev
 
   # Fedora/RHEL
   sudo dnf install openblas-devel
+  ```
+  For source builds that should use AVX2, set:
+  ```bash
+  export RUSTFLAGS="-C target-feature=+avx2"
   ```
 
 ### Rust Toolchain
@@ -73,6 +77,7 @@ docs = Nx.tensor([
 scores = ExMaxsimCpu.maxsim_scores(query, docs)
 # => #Nx.Tensor<f32[2]>
 ```
+Note: MaxSim expects L2-normalized embeddings. Normalize query and docs along the token axis before scoring.
 
 ### Variable-Length Documents
 
@@ -138,34 +143,50 @@ For additional performance on Intel CPUs, you can enable libxsmm:
 
 ## Benchmarks
 
-ExMaxsimCpu delivers exceptional performance, **even outperforming GPU-accelerated alternatives**:
+ExMaxsimCpu delivers strong CPU performance, especially on small-to-moderate batch sizes:
+
+### Benchmark Environment
+
+- OS: macOS 26.2 (25C56)
+- CPU: Apple M4 Pro (12 physical / 12 logical cores)
+- Architecture: arm64
+- Elixir: 1.19.5 (OTP 28)
+- BLAS: Accelerate
+- Env: OPENBLAS_NUM_THREADS=1, RAYON_NUM_THREADS=8
+- Nx CPU backend: Torchx (CPU)
 
 ### Performance Summary
 
 | Implementation | Typical Latency | vs ExMaxsimCpu |
 |---------------|-----------------|----------------|
-| **ExMaxsimCpu** (BLAS+SIMD) | 0.09 - 0.28 ms | — |
-| Nx + Torchx MPS (Apple GPU) | 0.86 - 4.43 ms | ~14x slower |
-| Nx BinaryBackend (pure Elixir) | 426 - 5,842 ms | ~13,000x slower |
+| **ExMaxsimCpu** (BLAS+SIMD) | 0.08 - 0.28 ms | — |
+| Nx CPU backend (Torchx) | 0.20 - 0.89 ms | ~4x slower |
+| Nx + Torchx MPS (Apple GPU) | 1.09 - 3.24 ms | ~15x slower |
+| Nx BinaryBackend (unaccelerated) | 386 - 5,038 ms | ~13,800x slower |
 
-> **Key insight:** ExMaxsimCpu is faster than GPU acceleration! The combination of optimized BLAS (Accelerate/OpenBLAS) and hand-tuned SIMD (AVX2/NEON) outperforms even Apple's Metal Performance Shaders.
+Notes:
+- Nx BinaryBackend is an unaccelerated baseline; EXLA/Torchx CPU will be faster.
+- Nx CPU backend results (EXLA or Torchx) are included when available.
+- MPS timings are for small shapes where transfer overhead can dominate.
+- Results are machine- and shape-dependent; run your own benchmarks for production sizing.
 
-### Three-Way Performance Comparison
+### Performance Comparison
 
 ![Three-Way Comparison](assets/benchmark_three_way.png)
 
-*Benchmark on Apple M4 Pro, showing ExMaxsimCpu (blue) vs Nx+MPS GPU (green) vs Nx BinaryBackend (orange) on a log scale.*
+*Benchmark on Apple Silicon (this run), showing ExMaxsimCpu (blue), Nx BinaryBackend (orange), and optional Nx CPU/MPS backends on a log scale.*
 
 ### Speedup Analysis
 
 | Comparison | Speedup Factor |
 |------------|----------------|
-| vs Nx BinaryBackend | **4,000x - 19,000x** |
-| vs Nx + Torchx MPS (GPU) | **6x - 29x** |
+| vs Nx BinaryBackend | **4,100x - 24,200x** |
+| vs Nx CPU backend (Torchx) | **2.1x - 6.2x** |
+| vs Nx + Torchx MPS (GPU) | **7.5x - 24.6x** |
 
 ![Speedup Comparison](assets/benchmark_speedup.png)
 
-### Why is CPU faster than GPU?
+### Why can CPU win on these shapes?
 
 1. **Optimized BLAS**: Uses Apple Accelerate (or OpenBLAS on Linux) which is highly tuned for the CPU architecture
 2. **SIMD Instructions**: Hand-optimized AVX2/NEON code for max-reduction operations
@@ -190,7 +211,7 @@ ExMaxsimCpu delivers exceptional performance, **even outperforming GPU-accelerat
 
 ### Running Benchmarks
 
-Generate benchmark data (includes MPS GPU comparison on Apple Silicon):
+Generate benchmark data (includes optional MPS and Nx CPU backends when available):
 ```bash
 OPENBLAS_NUM_THREADS=1 mix run bench/generate_plots.exs
 ```
@@ -200,7 +221,7 @@ Generate plots:
 uv run bench/plot_benchmarks.py
 ```
 
-> **Note:** For MPS benchmarks, ensure `torchx` is installed. The benchmark automatically detects GPU availability.
+> **Note:** For MPS benchmarks, ensure `torchx` is installed. For Nx CPU backends, install `torchx` or add `exla` to your dev deps. The benchmark auto-detects availability.
 
 ## Platform Support
 

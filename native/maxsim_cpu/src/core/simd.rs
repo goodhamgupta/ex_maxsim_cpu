@@ -1,18 +1,18 @@
 //! SIMD-optimized operations for MaxSim.
 //!
 //! Provides platform-specific SIMD implementations:
-//! - AVX2 for x86_64
+//! - AVX2 for x86_64 (when enabled at compile time)
 //! - NEON for aarch64
 //! - Scalar fallback for other platforms
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
 use std::arch::x86_64::*;
 
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
 /// Find maximum value in a slice using AVX2 SIMD with prefetching.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
 #[inline]
 pub fn simd_max(slice: &[f32]) -> f32 {
     if slice.len() < 8 {
@@ -138,7 +138,10 @@ pub fn simd_max(slice: &[f32]) -> f32 {
 }
 
 /// Scalar fallback for platforms without SIMD support.
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(not(any(
+    all(target_arch = "x86_64", target_feature = "avx2"),
+    target_arch = "aarch64"
+)))]
 #[inline]
 pub fn simd_max(slice: &[f32]) -> f32 {
     slice.iter().copied().fold(f32::NEG_INFINITY, f32::max)
