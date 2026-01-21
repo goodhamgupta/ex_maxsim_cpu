@@ -6,7 +6,7 @@
 # ]
 # ///
 """
-Generate benchmark comparison plots for ExMaxsimCpu vs Nx vs Nx+MPS.
+Generate benchmark comparison plots for ExMaxsimCpu vs Nx vs Nx+MPS (and Nx CPU backends if available).
 
 Run after: mix run bench/generate_plots.exs
 Usage: uv run bench/plot_benchmarks.py
@@ -29,6 +29,7 @@ plt.rcParams['axes.titlesize'] = 16
 EX_COLOR = '#6366f1'  # Indigo - ExMaxsimCpu
 NX_COLOR = '#f97316'  # Orange - Pure Nx
 MPS_COLOR = '#10b981'  # Emerald - Nx + MPS
+NX_CPU_COLOR = '#0ea5e9'  # Sky - Nx CPU backend
 SPEEDUP_COLOR = '#8b5cf6'  # Purple
 
 
@@ -36,6 +37,8 @@ def load_data(csv_path):
     """Load benchmark data from CSV."""
     data = {'n_docs': [], 'd_len': [], 'dim': []}
     has_mps = False
+    has_nx_cpu = False
+    nx_cpu_label = None
 
     with open(csv_path, 'r') as f:
         reader = csv.DictReader(f)
@@ -45,19 +48,32 @@ def load_data(csv_path):
                 'param': int(row['param_value']),
                 'ex_time': float(row['ex_time_ms']),
                 'nx_time': float(row['nx_time_ms']),
+                'nx_cpu_time': float(row['nx_cpu_time_ms']) if row.get('nx_cpu_time_ms') else None,
+                'nx_cpu_backend': row.get('nx_cpu_backend') or None,
                 'mps_time': float(row['mps_time_ms']) if row['mps_time_ms'] else None,
                 'mps_transfer_time': float(row['mps_transfer_time_ms']) if row.get('mps_transfer_time_ms') else None,
                 'speedup_nx': float(row['speedup_vs_nx']),
+                'speedup_nx_cpu': float(row['speedup_vs_nx_cpu']) if row.get('speedup_vs_nx_cpu') else None,
                 'speedup_mps': float(row['speedup_vs_mps']) if row['speedup_vs_mps'] else None,
             }
             data[config].append(entry)
             if entry['mps_time'] is not None:
                 has_mps = True
+            if entry['nx_cpu_time'] is not None:
+                has_nx_cpu = True
+            if entry['nx_cpu_backend'] and not nx_cpu_label:
+                nx_cpu_label = entry['nx_cpu_backend']
 
-    return data, has_mps
+    meta = {
+        'has_mps': has_mps,
+        'has_nx_cpu': has_nx_cpu,
+        'nx_cpu_label': nx_cpu_label,
+    }
+
+    return data, meta
 
 
-def plot_time_comparison(data, config_name, param_label, output_path, has_mps):
+def plot_time_comparison(data, config_name, param_label, output_path, has_mps, has_nx_cpu, nx_cpu_label):
     """Create a bar chart comparing execution times."""
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -65,18 +81,23 @@ def plot_time_comparison(data, config_name, param_label, output_path, has_mps):
     ex_times = [d['ex_time'] for d in data]
     nx_times = [d['nx_time'] for d in data]
     mps_times = [d['mps_time'] if d['mps_time'] else 0 for d in data]
+    nx_cpu_times = [d['nx_cpu_time'] if d['nx_cpu_time'] else 0 for d in data]
 
     x = np.arange(len(params))
 
+    series = [
+        ('ExMaxsimCpu (BLAS+SIMD)', ex_times, EX_COLOR),
+    ]
+    if has_nx_cpu and any(nx_cpu_times):
+        series.append((nx_cpu_label or 'Nx CPU Backend', nx_cpu_times, NX_CPU_COLOR))
     if has_mps and any(mps_times):
-        width = 0.25
-        bars1 = ax.bar(x - width, ex_times, width, label='ExMaxsimCpu (BLAS+SIMD)', color=EX_COLOR, alpha=0.8)
-        bars2 = ax.bar(x, mps_times, width, label='Nx + Torchx MPS (GPU)', color=MPS_COLOR, alpha=0.8)
-        bars3 = ax.bar(x + width, nx_times, width, label='Nx BinaryBackend', color=NX_COLOR, alpha=0.8)
-    else:
-        width = 0.35
-        bars1 = ax.bar(x - width/2, ex_times, width, label='ExMaxsimCpu (BLAS+SIMD)', color=EX_COLOR, alpha=0.8)
-        bars3 = ax.bar(x + width/2, nx_times, width, label='Nx BinaryBackend', color=NX_COLOR, alpha=0.8)
+        series.append(('Nx + Torchx MPS (GPU)', mps_times, MPS_COLOR))
+    series.append(('Nx BinaryBackend', nx_times, NX_COLOR))
+
+    width = 0.8 / len(series)
+    offsets = np.linspace(-0.4 + width / 2, 0.4 - width / 2, len(series))
+    for offset, (label, times, color) in zip(offsets, series):
+        ax.bar(x + offset, times, width, label=label, color=color, alpha=0.8)
 
     ax.set_xlabel(param_label)
     ax.set_ylabel('Time (ms)')
@@ -92,7 +113,7 @@ def plot_time_comparison(data, config_name, param_label, output_path, has_mps):
     print(f"Saved: {output_path}")
 
 
-def plot_speedup_chart(all_data, output_path, has_mps):
+def plot_speedup_chart(all_data, output_path, has_mps, has_nx_cpu):
     """Create a combined speedup chart."""
     n_cols = 3
     fig, axes = plt.subplots(1, n_cols, figsize=(14, 5))
@@ -108,46 +129,42 @@ def plot_speedup_chart(all_data, output_path, has_mps):
         params = [str(d['param']) for d in data]
         speedups_nx = [d['speedup_nx'] for d in data]
         speedups_mps = [d['speedup_mps'] if d['speedup_mps'] else 0 for d in data]
+        speedups_nx_cpu = [d['speedup_nx_cpu'] if d['speedup_nx_cpu'] else 0 for d in data]
 
         x = np.arange(len(params))
 
+        series = [
+            ('vs Nx Binary', speedups_nx, NX_COLOR),
+        ]
+        if has_nx_cpu and any(speedups_nx_cpu):
+            series.append(('vs Nx CPU', speedups_nx_cpu, NX_CPU_COLOR))
         if has_mps and any(speedups_mps):
-            width = 0.35
-            bars1 = ax.bar(x - width/2, speedups_nx, width, label='vs Nx Binary', color=NX_COLOR, alpha=0.8)
-            bars2 = ax.bar(x + width/2, speedups_mps, width, label='vs Nx MPS', color=MPS_COLOR, alpha=0.8)
+            series.append(('vs Nx MPS', speedups_mps, MPS_COLOR))
 
-            # Add value labels
-            for bar, val in zip(bars1, speedups_nx):
-                ax.annotate(f'{val:.0f}x',
-                           xy=(bar.get_x() + bar.get_width()/2, bar.get_height()),
-                           xytext=(0, 3), textcoords='offset points',
-                           ha='center', va='bottom', fontsize=8, fontweight='bold')
-            for bar, val in zip(bars2, speedups_mps):
+        width = 0.8 / len(series)
+        offsets = np.linspace(-0.4 + width / 2, 0.4 - width / 2, len(series))
+        for offset, (series_label, values, color) in zip(offsets, series):
+            bars = ax.bar(x + offset, values, width, label=series_label, color=color, alpha=0.8)
+            for bar, val in zip(bars, values):
                 if val > 0:
-                    ax.annotate(f'{val:.1f}x',
+                    ax.annotate(f'{val:.0f}x',
                                xy=(bar.get_x() + bar.get_width()/2, bar.get_height()),
                                xytext=(0, 3), textcoords='offset points',
                                ha='center', va='bottom', fontsize=8, fontweight='bold')
-        else:
-            bars = ax.bar(x, speedups_nx, color=NX_COLOR, alpha=0.8)
-            for bar, val in zip(bars, speedups_nx):
-                ax.annotate(f'{val:.0f}x',
-                           xy=(bar.get_x() + bar.get_width()/2, bar.get_height()),
-                           xytext=(0, 3), textcoords='offset points',
-                           ha='center', va='bottom', fontsize=9, fontweight='bold')
 
         ax.set_xlabel(label)
         ax.set_ylabel('Speedup (x times faster)')
         ax.set_xticks(x)
         ax.set_xticklabels(params)
-        if has_mps:
+        if has_mps or has_nx_cpu:
             ax.legend(loc='upper left', fontsize=8)
 
     title = 'ExMaxsimCpu Speedup'
+    title += ' vs Nx (BinaryBackend)'
+    if has_nx_cpu:
+        title += ' and Nx (CPU)'
     if has_mps:
-        title += ' vs Nx (BinaryBackend) and Nx (MPS GPU)'
-    else:
-        title += ' vs Nx (BinaryBackend)'
+        title += ' and Nx (MPS GPU)'
 
     fig.suptitle(title, fontsize=14, fontweight='bold')
     plt.tight_layout()
@@ -156,7 +173,7 @@ def plot_speedup_chart(all_data, output_path, has_mps):
     print(f"Saved: {output_path}")
 
 
-def plot_summary(all_data, output_path, has_mps):
+def plot_summary(all_data, output_path, has_mps, has_nx_cpu, nx_cpu_label):
     """Create a summary visualization."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -166,12 +183,17 @@ def plot_summary(all_data, output_path, has_mps):
     ex_times = [d['ex_time'] for d in data]
     nx_times = [d['nx_time'] for d in data]
     mps_times = [d['mps_time'] if d['mps_time'] else None for d in data]
+    nx_cpu_times = [d['nx_cpu_time'] if d['nx_cpu_time'] else None for d in data]
 
     ax1.plot(params, ex_times, 'o-', color=EX_COLOR, linewidth=2, markersize=8, label='ExMaxsimCpu (BLAS+SIMD)')
     if has_mps and any(mps_times):
         mps_valid = [(p, t) for p, t in zip(params, mps_times) if t is not None]
         if mps_valid:
             ax1.plot([p for p, _ in mps_valid], [t for _, t in mps_valid], 'd-', color=MPS_COLOR, linewidth=2, markersize=8, label='Nx + Torchx MPS (GPU)')
+    if has_nx_cpu and any(nx_cpu_times):
+        cpu_valid = [(p, t) for p, t in zip(params, nx_cpu_times) if t is not None]
+        if cpu_valid:
+            ax1.plot([p for p, _ in cpu_valid], [t for _, t in cpu_valid], '^-', color=NX_CPU_COLOR, linewidth=2, markersize=8, label=nx_cpu_label or 'Nx CPU Backend')
     ax1.plot(params, nx_times, 's-', color=NX_COLOR, linewidth=2, markersize=8, label='Nx BinaryBackend')
 
     ax1.set_xlabel('Number of Documents')
@@ -216,10 +238,10 @@ def plot_summary(all_data, output_path, has_mps):
     print(f"Saved: {output_path}")
 
 
-def plot_three_way_comparison(all_data, output_path, has_mps):
-    """Create a comprehensive three-way comparison chart."""
-    if not has_mps:
-        print(f"Skipping three-way comparison (no MPS data)")
+def plot_three_way_comparison(all_data, output_path, has_mps, has_nx_cpu, nx_cpu_label):
+    """Create a comprehensive comparison chart."""
+    if not has_mps and not has_nx_cpu:
+        print("Skipping multi-way comparison (no MPS/CPU backend data)")
         return
 
     fig, ax = plt.subplots(figsize=(12, 7))
@@ -229,25 +251,35 @@ def plot_three_way_comparison(all_data, output_path, has_mps):
     ex_times = []
     nx_times = []
     mps_times = []
+    nx_cpu_times = []
 
     for config in ['n_docs', 'd_len', 'dim']:
         for d in all_data[config]:
-            if d['mps_time']:
+            if d['mps_time'] or d['nx_cpu_time']:
                 all_configs.append(f"{config}={d['param']}")
                 ex_times.append(d['ex_time'])
                 nx_times.append(d['nx_time'])
-                mps_times.append(d['mps_time'])
+                mps_times.append(d['mps_time'] if d['mps_time'] else 0)
+                nx_cpu_times.append(d['nx_cpu_time'] if d['nx_cpu_time'] else 0)
 
     if not all_configs:
         print(f"Skipping three-way comparison (no complete data)")
         return
 
     x = np.arange(len(all_configs))
-    width = 0.25
+    series = [
+        ('ExMaxsimCpu (BLAS+SIMD)', ex_times, EX_COLOR),
+    ]
+    if has_nx_cpu and any(nx_cpu_times):
+        series.append((nx_cpu_label or 'Nx CPU Backend', nx_cpu_times, NX_CPU_COLOR))
+    if has_mps and any(mps_times):
+        series.append(('Nx + Torchx MPS (GPU)', mps_times, MPS_COLOR))
+    series.append(('Nx BinaryBackend', nx_times, NX_COLOR))
 
-    bars1 = ax.bar(x - width, ex_times, width, label='ExMaxsimCpu (BLAS+SIMD)', color=EX_COLOR, alpha=0.8)
-    bars2 = ax.bar(x, mps_times, width, label='Nx + Torchx MPS (GPU)', color=MPS_COLOR, alpha=0.8)
-    bars3 = ax.bar(x + width, nx_times, width, label='Nx BinaryBackend', color=NX_COLOR, alpha=0.8)
+    width = 0.8 / len(series)
+    offsets = np.linspace(-0.4 + width / 2, 0.4 - width / 2, len(series))
+    for offset, (label, times, color) in zip(offsets, series):
+        ax.bar(x + offset, times, width, label=label, color=color, alpha=0.8)
 
     ax.set_xlabel('Configuration')
     ax.set_ylabel('Time (ms)')
@@ -255,7 +287,7 @@ def plot_three_way_comparison(all_data, output_path, has_mps):
     ax.set_xticklabels(all_configs, rotation=45, ha='right')
     ax.set_yscale('log')
     ax.legend(loc='upper left')
-    ax.set_title('Three-Way Performance Comparison: ExMaxsimCpu vs Nx (MPS) vs Nx (Binary)')
+    ax.set_title('Performance Comparison: ExMaxsimCpu vs Nx (Binary/MPS/CPU)')
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -274,32 +306,41 @@ def main():
         return
 
     print("Loading benchmark data...")
-    data, has_mps = load_data(csv_path)
+    data, meta = load_data(csv_path)
+    has_mps = meta['has_mps']
+    has_nx_cpu = meta['has_nx_cpu']
+    nx_cpu_label = meta['nx_cpu_label']
 
     if has_mps:
-        print("MPS data detected - generating three-way comparison plots")
+        print("MPS data detected - generating comparison plots")
     else:
-        print("No MPS data - generating two-way comparison plots")
+        print("No MPS data - generating comparison plots")
 
     print("\nGenerating plots...")
 
     # Individual comparison plots
-    plot_time_comparison(data['n_docs'], 'n_docs', 'Number of Documents',
-                        assets_dir / 'benchmark_n_docs.png', has_mps)
-    plot_time_comparison(data['d_len'], 'd_len', 'Document Length (tokens)',
-                        assets_dir / 'benchmark_d_len.png', has_mps)
-    plot_time_comparison(data['dim'], 'dim', 'Embedding Dimension',
-                        assets_dir / 'benchmark_dim.png', has_mps)
+    plot_time_comparison(
+        data['n_docs'], 'n_docs', 'Number of Documents',
+        assets_dir / 'benchmark_n_docs.png', has_mps, has_nx_cpu, nx_cpu_label
+    )
+    plot_time_comparison(
+        data['d_len'], 'd_len', 'Document Length (tokens)',
+        assets_dir / 'benchmark_d_len.png', has_mps, has_nx_cpu, nx_cpu_label
+    )
+    plot_time_comparison(
+        data['dim'], 'dim', 'Embedding Dimension',
+        assets_dir / 'benchmark_dim.png', has_mps, has_nx_cpu, nx_cpu_label
+    )
 
     # Combined speedup chart
-    plot_speedup_chart(data, assets_dir / 'benchmark_speedup.png', has_mps)
+    plot_speedup_chart(data, assets_dir / 'benchmark_speedup.png', has_mps, has_nx_cpu)
 
     # Summary plot
-    plot_summary(data, assets_dir / 'benchmark_summary.png', has_mps)
+    plot_summary(data, assets_dir / 'benchmark_summary.png', has_mps, has_nx_cpu, nx_cpu_label)
 
-    # Three-way comparison (if MPS data available)
-    if has_mps:
-        plot_three_way_comparison(data, assets_dir / 'benchmark_three_way.png', has_mps)
+    # Multi-way comparison (if MPS/CPU data available)
+    if has_mps or has_nx_cpu:
+        plot_three_way_comparison(data, assets_dir / 'benchmark_three_way.png', has_mps, has_nx_cpu, nx_cpu_label)
 
     print("\nAll plots generated successfully!")
 

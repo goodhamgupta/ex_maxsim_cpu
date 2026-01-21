@@ -13,6 +13,7 @@ IO.puts("==========================================\n")
 defmodule BenchHelper do
   # Suppress compile warnings for optional Torchx
   @compile {:no_warn_undefined, Torchx}
+  @compile {:no_warn_undefined, EXLA}
 
   def random_normalized(shape, backend \\ Nx.BinaryBackend) do
     key = Nx.Random.key(System.unique_integer([:positive]))
@@ -48,6 +49,37 @@ defmodule BenchHelper do
       {Torchx.Backend, device: :mps}
     else
       _ -> nil
+    end
+  end
+
+  def torchx_cpu_backend do
+    with true <- Code.ensure_loaded?(Torchx),
+         {:ok, _apps} <- Application.ensure_all_started(:torchx) do
+      {Torchx.Backend, device: :cpu}
+    else
+      _ -> nil
+    end
+  end
+
+  def exla_cpu_backend do
+    with true <- Code.ensure_loaded?(EXLA),
+         {:ok, _apps} <- Application.ensure_all_started(:exla) do
+      {EXLA.Backend, client: :host}
+    else
+      _ -> nil
+    end
+  end
+
+  def cpu_backend do
+    case exla_cpu_backend() do
+      nil ->
+        case torchx_cpu_backend() do
+          nil -> nil
+          backend -> {"Torchx (CPU)", backend}
+        end
+
+      backend ->
+        {"EXLA (CPU)", backend}
     end
   end
 
@@ -97,6 +129,7 @@ end
 
 # Check for MPS availability
 mps_backend = BenchHelper.torchx_mps_backend()
+cpu_backend = BenchHelper.cpu_backend()
 
 if mps_backend do
   IO.puts("✓ Torchx MPS backend available - will benchmark GPU acceleration")
@@ -105,7 +138,28 @@ else
   IO.puts("  (Install torchx and run on Apple Silicon for MPS benchmarks)")
 end
 
+if cpu_backend do
+  {cpu_label, _backend} = cpu_backend
+  IO.puts("✓ #{cpu_label} backend available - will benchmark Nx CPU backend")
+else
+  IO.puts("⚠ EXLA/Torchx CPU backend not available - skipping Nx CPU benchmarks")
+  IO.puts("  (Install exla or torchx to benchmark Nx CPU backends)")
+end
+
 IO.puts("")
+
+# One-time warmup to avoid NIF load cost in the first measurement
+IO.puts("Warming up NIF...")
+warmup_query = BenchHelper.random_normalized({2, 2})
+warmup_docs = BenchHelper.random_normalized({1, 2, 2})
+_ = ExMaxsimCpu.maxsim_scores(warmup_query, warmup_docs)
+
+if cpu_backend do
+  {_label, backend} = cpu_backend
+  warmup_query_cpu = Nx.backend_transfer(warmup_query, backend)
+  warmup_docs_cpu = Nx.backend_transfer(warmup_docs, backend)
+  _ = NxReference.maxsim_scores(warmup_query_cpu, warmup_docs_cpu) |> Nx.to_binary()
+end
 
 # Benchmark configurations
 # Only include values where we can run comparisons without timeout
@@ -149,6 +203,24 @@ results =
         :ok
       end, 3)
 
+      # Measure Nx CPU backend (EXLA/Torchx) if available
+      {nx_cpu_time, nx_cpu_backend_label} =
+        if cpu_backend do
+          {label, backend} = cpu_backend
+          query_cpu = Nx.backend_transfer(query_bin, backend)
+          docs_cpu = Nx.backend_transfer(docs_bin, backend)
+
+          time = BenchHelper.measure_time(fn ->
+            result = NxReference.maxsim_scores(query_cpu, docs_cpu)
+            _ = Nx.to_binary(result)
+            :ok
+          end, 3)
+
+          {time, label}
+        else
+          {nil, nil}
+        end
+
       # Measure Nx with MPS backend (if available)
       {mps_time, mps_transfer_time} =
         if mps_backend do
@@ -183,19 +255,32 @@ results =
       # Calculate speedups
       speedup_vs_nx = nx_time / ex_time
       speedup_vs_mps = if mps_time, do: mps_time / ex_time, else: nil
+      speedup_vs_nx_cpu = if nx_cpu_time, do: nx_cpu_time / ex_time, else: nil
 
       # Print results
       mps_str = if mps_time, do: ", MPS: #{Float.round(mps_time, 2)}ms", else: ""
-      IO.puts("ExMaxsim: #{Float.round(ex_time, 2)}ms, Nx: #{Float.round(nx_time, 2)}ms#{mps_str}")
+      cpu_str =
+        if nx_cpu_time do
+          ", Nx CPU (#{nx_cpu_backend_label}): #{Float.round(nx_cpu_time, 2)}ms"
+        else
+          ""
+        end
+
+      IO.puts(
+        "ExMaxsim: #{Float.round(ex_time, 2)}ms, Nx: #{Float.round(nx_time, 2)}ms#{cpu_str}#{mps_str}"
+      )
 
       %{
         config: config.name,
         param_value: value,
         ex_time_ms: ex_time,
         nx_time_ms: nx_time,
+        nx_cpu_time_ms: nx_cpu_time,
+        nx_cpu_backend: nx_cpu_backend_label,
         mps_time_ms: mps_time,
         mps_transfer_time_ms: mps_transfer_time,
         speedup_vs_nx: speedup_vs_nx,
+        speedup_vs_nx_cpu: speedup_vs_nx_cpu,
         speedup_vs_mps: speedup_vs_mps
       }
     end
@@ -203,16 +288,20 @@ results =
 
 # Write CSV
 csv_path = "assets/benchmark_data.csv"
-csv_header = "config,param_value,ex_time_ms,nx_time_ms,mps_time_ms,mps_transfer_time_ms,speedup_vs_nx,speedup_vs_mps"
+csv_header =
+  "config,param_value,ex_time_ms,nx_time_ms,nx_cpu_time_ms,nx_cpu_backend,mps_time_ms,mps_transfer_time_ms,speedup_vs_nx,speedup_vs_nx_cpu,speedup_vs_mps"
 
 csv_content =
   [csv_header] ++
   Enum.map(results, fn r ->
     mps_time = if r.mps_time_ms, do: Float.round(r.mps_time_ms, 4), else: ""
     mps_transfer = if r.mps_transfer_time_ms, do: Float.round(r.mps_transfer_time_ms, 4), else: ""
+    nx_cpu_time = if r.nx_cpu_time_ms, do: Float.round(r.nx_cpu_time_ms, 4), else: ""
+    nx_cpu_backend = r.nx_cpu_backend || ""
+    speedup_nx_cpu = if r.speedup_vs_nx_cpu, do: Float.round(r.speedup_vs_nx_cpu, 2), else: ""
     speedup_mps = if r.speedup_vs_mps, do: Float.round(r.speedup_vs_mps, 2), else: ""
 
-    "#{r.config},#{r.param_value},#{Float.round(r.ex_time_ms, 4)},#{Float.round(r.nx_time_ms, 4)},#{mps_time},#{mps_transfer},#{Float.round(r.speedup_vs_nx, 2)},#{speedup_mps}"
+    "#{r.config},#{r.param_value},#{Float.round(r.ex_time_ms, 4)},#{Float.round(r.nx_time_ms, 4)},#{nx_cpu_time},#{nx_cpu_backend},#{mps_time},#{mps_transfer},#{Float.round(r.speedup_vs_nx, 2)},#{speedup_nx_cpu},#{speedup_mps}"
   end)
 
 File.write!(csv_path, Enum.join(csv_content, "\n"))
@@ -222,6 +311,16 @@ IO.puts("\n\nBenchmark data written to #{csv_path}")
 IO.puts("\n=== Summary ===")
 avg_speedup_nx = Enum.sum(Enum.map(results, & &1.speedup_vs_nx)) / length(results)
 IO.puts("Average speedup vs Nx (BinaryBackend): #{Float.round(avg_speedup_nx, 0)}x")
+
+if cpu_backend do
+  {cpu_label, _backend} = cpu_backend
+  cpu_results = Enum.filter(results, & &1.speedup_vs_nx_cpu)
+  if length(cpu_results) > 0 do
+    avg_speedup_nx_cpu =
+      Enum.sum(Enum.map(cpu_results, & &1.speedup_vs_nx_cpu)) / length(cpu_results)
+    IO.puts("Average speedup vs Nx CPU (#{cpu_label}): #{Float.round(avg_speedup_nx_cpu, 1)}x")
+  end
+end
 
 if mps_backend do
   mps_results = Enum.filter(results, & &1.speedup_vs_mps)

@@ -10,11 +10,46 @@ IO.puts("======================\n")
 
 # Generate random normalized vectors
 defmodule BenchHelper do
+  # Suppress compile warnings for optional backends
+  @compile {:no_warn_undefined, Torchx}
+  @compile {:no_warn_undefined, EXLA}
+
   def random_normalized(shape) do
     key = Nx.Random.key(System.unique_integer([:positive]))
     {tensor, _key} = Nx.Random.normal(key, shape: shape, type: :f32)
     norms = Nx.sqrt(Nx.sum(Nx.pow(tensor, 2), axes: [-1], keep_axes: true))
     Nx.divide(tensor, norms)
+  end
+
+  def torchx_cpu_backend do
+    with true <- Code.ensure_loaded?(Torchx),
+         {:ok, _apps} <- Application.ensure_all_started(:torchx) do
+      {Torchx.Backend, device: :cpu}
+    else
+      _ -> nil
+    end
+  end
+
+  def exla_cpu_backend do
+    with true <- Code.ensure_loaded?(EXLA),
+         {:ok, _apps} <- Application.ensure_all_started(:exla) do
+      {EXLA.Backend, client: :host}
+    else
+      _ -> nil
+    end
+  end
+
+  def cpu_backend do
+    case exla_cpu_backend() do
+      nil ->
+        case torchx_cpu_backend() do
+          nil -> nil
+          backend -> {"Torchx (CPU)", backend}
+        end
+
+      backend ->
+        {"EXLA (CPU)", backend}
+    end
   end
 end
 
@@ -44,6 +79,14 @@ end
 IO.puts("Generating test data...")
 query = BenchHelper.random_normalized({32, 128})
 docs = BenchHelper.random_normalized({100, 64, 128})
+cpu_backend = BenchHelper.cpu_backend()
+
+if cpu_backend do
+  {label, _backend} = cpu_backend
+  IO.puts("✓ Nx CPU backend available: #{label}")
+else
+  IO.puts("⚠ Nx CPU backend not available (install torchx or exla)")
+end
 
 # Correctness check
 IO.puts("\nCorrectness check:")
@@ -59,18 +102,29 @@ IO.puts("  Status: #{if max_diff < 1.0e-4, do: "✓ PASS", else: "✗ FAIL"}")
 # Benchmark comparison
 IO.puts("\nPerformance comparison (32 query tokens, 128 dim, 64 doc tokens, 100 docs):")
 
-Benchee.run(
-  %{
-    "ExMaxsimCpu (BLAS+SIMD)" => fn ->
-      ExMaxsimCpu.maxsim_scores(query, docs)
-    end,
-    "Pure Nx Reference" => fn ->
-      NxReference.maxsim_scores(query, docs)
-    end
-  },
-  warmup: 1,
-  time: 3
-)
+benchmarks = %{
+  "ExMaxsimCpu (BLAS+SIMD)" => fn ->
+    ExMaxsimCpu.maxsim_scores(query, docs)
+  end,
+  "Nx BinaryBackend" => fn ->
+    NxReference.maxsim_scores(query, docs) |> Nx.to_binary()
+  end
+}
+
+benchmarks =
+  if cpu_backend do
+    {label, backend} = cpu_backend
+    query_cpu = Nx.backend_transfer(query, backend)
+    docs_cpu = Nx.backend_transfer(docs, backend)
+
+    Map.put(benchmarks, "Nx #{label}", fn ->
+      NxReference.maxsim_scores(query_cpu, docs_cpu) |> Nx.to_binary()
+    end)
+  else
+    benchmarks
+  end
+
+Benchee.run(benchmarks, warmup: 1, time: 3)
 
 # Larger scale benchmark (ExMaxsimCpu only - Nx reference is too slow)
 IO.puts("\n\nLarger scale benchmark (ExMaxsimCpu only):")

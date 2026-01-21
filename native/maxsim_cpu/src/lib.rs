@@ -163,7 +163,7 @@ fn maxsim_scores_variable_nif<'a>(
         let query = binary_to_f32(&query_bin).map_err(|e| e.to_string())?;
 
         // Convert document binaries and validate sizes
-        let doc_data: Result<Vec<(usize, Vec<f32>)>, String> = doc_bins
+        let doc_data: Result<Vec<(usize, Cow<[f32]>)>, String> = doc_bins
             .iter()
             .zip(doc_lens.iter())
             .enumerate()
@@ -179,8 +179,7 @@ fn maxsim_scores_variable_nif<'a>(
                 }
 
                 let data = binary_to_f32(bin).map_err(|e| e.to_string())?;
-                // Convert Cow to owned Vec for lifetime reasons
-                Ok((len, data.into_owned()))
+                Ok((len, data))
             })
             .collect();
 
@@ -189,7 +188,7 @@ fn maxsim_scores_variable_nif<'a>(
         // Create slice references for the algorithm
         let doc_slices: Vec<(usize, &[f32])> = doc_data
             .iter()
-            .map(|(len, data)| (*len, data.as_slice()))
+            .map(|(len, data)| (*len, data.as_ref()))
             .collect();
 
         // Compute scores
