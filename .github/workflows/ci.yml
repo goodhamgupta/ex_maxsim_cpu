@@ -3,8 +3,24 @@ name: CI
 on:
   push:
     branches: [main, master]
+    paths:
+      - '**/*.ex'
+      - '**/*.exs'
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'mix.lock'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main, master]
+    paths:
+      - '**/*.ex'
+      - '**/*.exs'
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'mix.lock'
+      - '.github/workflows/ci.yml'
 
 env:
   MIX_ENV: test
