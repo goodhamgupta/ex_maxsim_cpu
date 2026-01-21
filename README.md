@@ -91,24 +91,6 @@ doc2 = Nx.tensor([[0.5, 0.5]], type: :f32)                          # 1 token
 scores = ExMaxsimCpu.maxsim_scores_variable(query, [doc1, doc2])
 ```
 
-### Raw Binary API (Advanced)
-
-For maximum performance when you already have raw binary data:
-
-```elixir
-# Query and docs as native-endian f32 binaries
-query_bin = <<1.0::float-32-native, 0.0::float-32-native, ...>>
-docs_bin = <<...>>
-
-scores_bin = ExMaxsimCpu.maxsim_scores_raw(
-  query_bin, q_len, dim,
-  docs_bin, n_docs, d_len
-)
-
-# Parse scores
-scores = for <<score::float-32-native <- scores_bin>>, do: score
-```
-
 ## Performance Tuning
 
 ### Environment Variables

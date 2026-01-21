@@ -8,6 +8,8 @@ defmodule ExMaxsimCpu do
 
   ## Usage with Nx Tensors
 
+  ExMaxsimCpu exposes an Nx-only public API.
+
       # Query: [q_len, dim] tensor
       query = Nx.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], type: :f32)
 
@@ -19,15 +21,6 @@ defmodule ExMaxsimCpu do
 
       scores = ExMaxsimCpu.maxsim_scores(query, docs)
       # => #Nx.Tensor<f32[2]>
-
-  ## Usage with Raw Binaries
-
-  For advanced use cases, you can use raw binaries directly:
-
-      query_bin = <<0.1::float-32-native, 0.2::float-32-native, ...>>
-      docs_bin = <<...>>
-
-      scores = ExMaxsimCpu.maxsim_scores_raw(query_bin, q_len, dim, docs_bin, n_docs, d_len)
 
   ## Performance Notes
 
@@ -108,7 +101,7 @@ defmodule ExMaxsimCpu do
   @spec maxsim_scores_variable(Nx.Tensor.t(), [Nx.Tensor.t()]) :: Nx.Tensor.t()
   def maxsim_scores_variable(_query, []) do
     raise ArgumentError,
-          "Empty document list not supported (Nx cannot create empty tensors). Use maxsim_scores_variable_raw/5 for empty lists."
+          "Empty document list not supported (Nx cannot create empty tensors)."
   end
 
   def maxsim_scores_variable(query, docs) when is_list(docs) do
@@ -145,103 +138,6 @@ defmodule ExMaxsimCpu do
     Nx.from_binary(scores_bin, :f32)
   end
 
-  @doc """
-  Compute MaxSim scores using raw binaries (advanced API).
-
-  This is a lower-level API for users who want to avoid Nx tensor overhead.
-
-  ## Parameters
-
-  - `query_bin`: Binary containing query vectors as f32 values (native endian)
-  - `q_len`: Number of query tokens
-  - `dim`: Embedding dimension
-  - `docs_bin`: Binary containing document vectors as f32 values
-  - `n_docs`: Number of documents
-  - `d_len`: Number of tokens per document (must be uniform)
-
-  ## Returns
-
-  Binary containing n_docs f32 scores.
-  """
-  @spec maxsim_scores_raw(
-          binary(),
-          pos_integer(),
-          pos_integer(),
-          binary(),
-          pos_integer(),
-          pos_integer()
-        ) ::
-          binary()
-  def maxsim_scores_raw(query_bin, q_len, dim, docs_bin, n_docs, d_len)
-      when is_binary(query_bin) and is_binary(docs_bin) and
-             is_integer(q_len) and q_len > 0 and
-             is_integer(dim) and dim > 0 and
-             is_integer(n_docs) and n_docs > 0 and
-             is_integer(d_len) and d_len > 0 do
-    expected_query_size = q_len * dim * 4
-    expected_docs_size = n_docs * d_len * dim * 4
-
-    if byte_size(query_bin) != expected_query_size do
-      raise ArgumentError,
-            "Query binary size mismatch: expected #{expected_query_size}, got #{byte_size(query_bin)}"
-    end
-
-    if byte_size(docs_bin) != expected_docs_size do
-      raise ArgumentError,
-            "Docs binary size mismatch: expected #{expected_docs_size}, got #{byte_size(docs_bin)}"
-    end
-
-    Nif.maxsim_scores_nif(query_bin, q_len, dim, docs_bin, n_docs, d_len)
-  end
-
-  @doc """
-  Compute MaxSim scores for variable-length documents using raw binaries (advanced API).
-
-  ## Parameters
-
-  - `query_bin`: Binary containing query vectors as f32 values
-  - `q_len`: Number of query tokens
-  - `dim`: Embedding dimension
-  - `doc_bins`: List of binaries, each containing a document's vectors
-  - `doc_lens`: List of token counts for each document
-
-  ## Returns
-
-  Binary containing n_docs f32 scores.
-  """
-  @spec maxsim_scores_variable_raw(binary(), pos_integer(), pos_integer(), [binary()], [
-          pos_integer()
-        ]) ::
-          binary()
-  def maxsim_scores_variable_raw(_query_bin, _q_len, _dim, [], []), do: <<>>
-
-  def maxsim_scores_variable_raw(query_bin, q_len, dim, doc_bins, doc_lens)
-      when is_binary(query_bin) and is_list(doc_bins) and is_list(doc_lens) do
-    expected_query_size = q_len * dim * 4
-
-    if byte_size(query_bin) != expected_query_size do
-      raise ArgumentError,
-            "Query binary size mismatch: expected #{expected_query_size}, got #{byte_size(query_bin)}"
-    end
-
-    if length(doc_bins) != length(doc_lens) do
-      raise ArgumentError, "doc_bins and doc_lens must have the same length"
-    end
-
-    # Validate each document binary size
-    Enum.zip(doc_bins, doc_lens)
-    |> Enum.with_index()
-    |> Enum.each(fn {{bin, len}, idx} ->
-      expected = len * dim * 4
-
-      if byte_size(bin) != expected do
-        raise ArgumentError,
-              "Doc #{idx} binary size mismatch: expected #{expected}, got #{byte_size(bin)}"
-      end
-    end)
-
-    Nif.maxsim_scores_variable_nif(query_bin, q_len, dim, doc_bins, doc_lens)
-  end
 
   # Private helpers
 
