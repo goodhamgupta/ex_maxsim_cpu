@@ -92,41 +92,8 @@ defmodule ExMaxsimCpuTest do
     test "handles empty list" do
       query = Nx.tensor([[1.0, 0.0]], type: :f32)
 
-      # Nx doesn't support empty tensors, so we return an empty binary
-      scores =
-        ExMaxsimCpu.maxsim_scores_variable_raw(
-          Nx.to_binary(query),
-          1,
-          2,
-          [],
-          []
-        )
-
-      assert scores == <<>>
-    end
-  end
-
-  describe "maxsim_scores_raw/6" do
-    test "works with raw binaries" do
-      # Query: 1 token, dim 2
-      query_bin = <<1.0::float-32-native, 0.0::float-32-native>>
-
-      # 1 doc: 1 token, dim 2
-      docs_bin = <<1.0::float-32-native, 0.0::float-32-native>>
-
-      scores_bin = ExMaxsimCpu.maxsim_scores_raw(query_bin, 1, 2, docs_bin, 1, 1)
-
-      assert byte_size(scores_bin) == 4
-      <<score::float-32-native>> = scores_bin
-      assert_in_delta(score, 1.0, 1.0e-5)
-    end
-
-    test "raises on size mismatch" do
-      query_bin = <<1.0::float-32-native>>
-      docs_bin = <<1.0::float-32-native>>
-
-      assert_raise ArgumentError, ~r/Query binary size mismatch/, fn ->
-        ExMaxsimCpu.maxsim_scores_raw(query_bin, 2, 2, docs_bin, 1, 1)
+      assert_raise ArgumentError, ~r/Empty document list not supported/, fn ->
+        ExMaxsimCpu.maxsim_scores_variable(query, [])
       end
     end
   end
