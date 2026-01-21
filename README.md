@@ -138,7 +138,43 @@ For additional performance on Intel CPUs, you can enable libxsmm:
 
 ## Benchmarks
 
-Coming soon! Use `mix run bench/benchmark.exs` after adding benchee to your dev dependencies.
+ExMaxsimCpu is **10,000-20,000x faster** than a pure Nx implementation thanks to optimized BLAS and SIMD operations.
+
+### Performance Summary
+
+![Benchmark Summary](assets/benchmark_summary.png)
+
+### Speedup by Configuration
+
+![Speedup Comparison](assets/benchmark_speedup.png)
+
+### Detailed Comparisons
+
+<details>
+<summary>Click to expand individual benchmark charts</summary>
+
+#### Varying Number of Documents
+![Benchmark by Number of Documents](assets/benchmark_n_docs.png)
+
+#### Varying Document Length
+![Benchmark by Document Length](assets/benchmark_d_len.png)
+
+#### Varying Embedding Dimension
+![Benchmark by Dimension](assets/benchmark_dim.png)
+
+</details>
+
+### Running Benchmarks
+
+Generate benchmark data:
+```bash
+OPENBLAS_NUM_THREADS=1 mix run bench/generate_plots.exs
+```
+
+Generate plots (requires Python with matplotlib):
+```bash
+uv run bench/plot_benchmarks.py
+```
 
 ## Platform Support
 
