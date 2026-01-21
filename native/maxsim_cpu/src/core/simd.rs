@@ -71,8 +71,8 @@ pub fn simd_max(slice: &[f32]) -> f32 {
         let mut result = _mm_cvtss_f32(final_max);
 
         // Handle remaining elements
-        for j in i..slice.len() {
-            result = result.max(slice[j]);
+        for &val in slice.iter().skip(i) {
+            result = result.max(val);
         }
 
         result
