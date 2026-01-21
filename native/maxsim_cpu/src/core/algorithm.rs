@@ -16,8 +16,8 @@ extern crate blas_src;
 
 // Thread-local buffers to avoid repeated allocations
 thread_local! {
-    static SIMILARITY_BUFFER: RefCell<Vec<f32>> = RefCell::new(Vec::new());
-    static BATCH_BUFFER: RefCell<Vec<f32>> = RefCell::new(Vec::with_capacity(1024 * 1024));
+    static SIMILARITY_BUFFER: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+    static BATCH_BUFFER: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Compute MaxSim scores for fixed-length documents.
@@ -171,11 +171,11 @@ fn maxsim_fused_doc_tiles(
                     }
 
                     // Update max values using NEON
-                    for qi in 0..q_len {
+                    for (qi, max_val_ref) in max_vals.iter_mut().enumerate() {
                         let base_idx = qi * actual_block_size;
                         let query_sims = &block_sims[base_idx..base_idx + actual_block_size];
                         let max_val = simd_max(query_sims);
-                        max_vals[qi] = max_vals[qi].max(max_val);
+                        *max_val_ref = max_val_ref.max(max_val);
                     }
                 }
 
@@ -266,7 +266,9 @@ fn maxsim_variable_length_impl(
     let (min_len, max_len) = doc_data
         .iter()
         .map(|(len, _)| *len)
-        .fold((usize::MAX, 0), |(min, max), len| (min.min(len), max.max(len)));
+        .fold((usize::MAX, 0), |(min, max), len| {
+            (min.min(len), max.max(len))
+        });
 
     if max_len as f32 / min_len as f32 <= 1.2 && n_docs >= 50 {
         // All documents have similar lengths - process in single batch
@@ -331,8 +333,7 @@ fn maxsim_variable_length_impl(
                     buffer.resize(required_size, 0.0);
 
                     // Copy documents contiguously
-                    for (batch_idx, &sorted_idx) in
-                        sorted_indices[i..batch_end].iter().enumerate()
+                    for (batch_idx, &sorted_idx) in sorted_indices[i..batch_end].iter().enumerate()
                     {
                         let (_, doc_slice) = doc_data[sorted_idx];
                         let dst_offset = batch_idx * first_len * dim;
@@ -363,8 +364,7 @@ fn maxsim_variable_length_impl(
                     buffer.resize(required_size, 0.0);
 
                     // Fill batch - only clear padding areas
-                    for (batch_idx, &sorted_idx) in
-                        sorted_indices[i..batch_end].iter().enumerate()
+                    for (batch_idx, &sorted_idx) in sorted_indices[i..batch_end].iter().enumerate()
                     {
                         let (doc_len, doc_slice) = doc_data[sorted_idx];
                         let src_size = doc_len * dim;

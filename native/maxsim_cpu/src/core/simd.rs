@@ -129,8 +129,8 @@ pub fn simd_max(slice: &[f32]) -> f32 {
         let mut result = vgetq_lane_f32(max_val, 0);
 
         // Handle remaining elements
-        for j in i..slice.len() {
-            result = result.max(slice[j]);
+        for &val in &slice[i..] {
+            result = result.max(val);
         }
 
         result

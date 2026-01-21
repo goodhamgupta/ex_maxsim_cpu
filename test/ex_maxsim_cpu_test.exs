@@ -93,9 +93,15 @@ defmodule ExMaxsimCpuTest do
       query = Nx.tensor([[1.0, 0.0]], type: :f32)
 
       # Nx doesn't support empty tensors, so we return an empty binary
-      scores = ExMaxsimCpu.maxsim_scores_variable_raw(
-        Nx.to_binary(query), 1, 2, [], []
-      )
+      scores =
+        ExMaxsimCpu.maxsim_scores_variable_raw(
+          Nx.to_binary(query),
+          1,
+          2,
+          [],
+          []
+        )
+
       assert scores == <<>>
     end
   end

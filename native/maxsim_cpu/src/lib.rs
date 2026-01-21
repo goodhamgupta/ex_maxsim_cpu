@@ -23,12 +23,12 @@ rustler::init!("Elixir.ExMaxsimCpu.Nif", load = load);
 /// Returns Cow::Borrowed if aligned, Cow::Owned if copy was needed.
 fn binary_to_f32<'a>(bin: &'a Binary) -> Result<Cow<'a, [f32]>, &'static str> {
     let bytes = bin.as_slice();
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err("Binary length must be a multiple of 4");
     }
 
     let ptr = bytes.as_ptr() as usize;
-    let aligned = (ptr % std::mem::align_of::<f32>()) == 0;
+    let aligned = ptr.is_multiple_of(std::mem::align_of::<f32>());
 
     if aligned {
         // SAFETY: alignment checked + length multiple of 4

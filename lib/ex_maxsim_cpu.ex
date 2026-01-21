@@ -103,7 +103,8 @@ defmodule ExMaxsimCpu do
   """
   @spec maxsim_scores_variable(Nx.Tensor.t(), [Nx.Tensor.t()]) :: Nx.Tensor.t()
   def maxsim_scores_variable(_query, []) do
-    raise ArgumentError, "Empty document list not supported (Nx cannot create empty tensors). Use maxsim_scores_variable_raw/5 for empty lists."
+    raise ArgumentError,
+          "Empty document list not supported (Nx cannot create empty tensors). Use maxsim_scores_variable_raw/5 for empty lists."
   end
 
   def maxsim_scores_variable(query, docs) when is_list(docs) do
@@ -158,7 +159,14 @@ defmodule ExMaxsimCpu do
 
   Binary containing n_docs f32 scores.
   """
-  @spec maxsim_scores_raw(binary(), pos_integer(), pos_integer(), binary(), pos_integer(), pos_integer()) ::
+  @spec maxsim_scores_raw(
+          binary(),
+          pos_integer(),
+          pos_integer(),
+          binary(),
+          pos_integer(),
+          pos_integer()
+        ) ::
           binary()
   def maxsim_scores_raw(query_bin, q_len, dim, docs_bin, n_docs, d_len)
       when is_binary(query_bin) and is_binary(docs_bin) and
@@ -197,7 +205,9 @@ defmodule ExMaxsimCpu do
 
   Binary containing n_docs f32 scores.
   """
-  @spec maxsim_scores_variable_raw(binary(), pos_integer(), pos_integer(), [binary()], [pos_integer()]) ::
+  @spec maxsim_scores_variable_raw(binary(), pos_integer(), pos_integer(), [binary()], [
+          pos_integer()
+        ]) ::
           binary()
   def maxsim_scores_variable_raw(_query_bin, _q_len, _dim, [], []), do: <<>>
 
