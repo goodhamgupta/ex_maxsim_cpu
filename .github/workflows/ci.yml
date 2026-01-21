@@ -12,7 +12,7 @@ env:
 
 jobs:
   test:
-    name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    name: Test (${{ matrix.os }} / Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
     runs-on: ${{ matrix.os }}
 
     strategy:
