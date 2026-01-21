@@ -3,7 +3,7 @@
 [![Hex.pm](https://img.shields.io/hexpm/v/ex_maxsim_cpu.svg)](https://hex.pm/packages/ex_maxsim_cpu)
 [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/ex_maxsim_cpu)
 
-High-performance MaxSim (Maximum Similarity) scoring for Elixir using BLAS GEMM operations with SIMD acceleration.
+High-performance MaxSim (Maximum Similarity) scoring for Elixir using BLAS GEMM operations with SIMD acceleration. This is a port of the [maxsim-cpu](https://github.com/mixedbread-ai/maxsim-cpu) package by [Mixedbread.ai](https://www.mixedbread.com/).
 
 ## What is MaxSim?
 
@@ -231,10 +231,6 @@ uv run bench/plot_benchmarks.py
 | Linux | x86_64 (AVX2) | ✅ Fully supported |
 | Linux | arm64 | ⚠️ Should work (untested) |
 | Windows | Any | ❌ Not supported |
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
 
 ## Credits
 
