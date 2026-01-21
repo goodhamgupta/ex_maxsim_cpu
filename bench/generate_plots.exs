@@ -30,16 +30,34 @@ defmodule BenchHelper do
 end
 
 defmodule NxReference do
-  def maxsim_scores(query, docs) do
-    {n_docs, _d_len, _dim} = Nx.shape(docs)
+  @moduledoc """
+  Optimized pure Nx MaxSim implementation using batched operations.
 
-    0..(n_docs - 1)
-    |> Enum.map(fn i ->
-      doc = docs[i]
-      sim = Nx.dot(query, [1], doc, [1])
-      Nx.sum(Nx.reduce_max(sim, axes: [1])) |> Nx.to_number()
-    end)
-    |> Nx.tensor(type: :f32)
+  This is the fair baseline for comparison - uses vectorized batch dot
+  product instead of sequential Enum.map.
+  """
+
+  def maxsim_scores(query, docs) do
+    # query: {q_len, dim}
+    # docs:  {n_docs, d_len, dim}
+
+    {n_docs, _d_len, dim} = Nx.shape(docs)
+    {q_len, ^dim} = Nx.shape(query)
+
+    # Transpose docs for batched matmul: {n_docs, dim, d_len}
+    docs_t = Nx.transpose(docs, axes: [0, 2, 1])
+
+    # Broadcast query to match batch dimension: {n_docs, q_len, dim}
+    query_b = Nx.broadcast(query, {n_docs, q_len, dim})
+
+    # Batched matmul: {n_docs, q_len, dim} x {n_docs, dim, d_len} -> {n_docs, q_len, d_len}
+    # Contract over dim (axis 2 of query_b, axis 1 of docs_t), batch over n_docs (axis 0)
+    sim = Nx.dot(query_b, [2], [0], docs_t, [1], [0])
+
+    # MaxSim: for each query token, take max over doc tokens, then sum over query tokens
+    sim
+    |> Nx.reduce_max(axes: [2])  # {n_docs, q_len}
+    |> Nx.sum(axes: [1])         # {n_docs}
   end
 end
 

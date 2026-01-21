@@ -138,7 +138,9 @@ For additional performance on Intel CPUs, you can enable libxsmm:
 
 ## Benchmarks
 
-ExMaxsimCpu is **10,000-20,000x faster** than a pure Nx implementation thanks to optimized BLAS and SIMD operations.
+ExMaxsimCpu is **4,500-22,000x faster** than a pure Nx implementation (using the default BinaryBackend) thanks to optimized BLAS and SIMD operations.
+
+> **Note:** The Nx reference uses an optimized vectorized implementation with batched `dot` operations - not a naive sequential loop. The speedup comes from ExMaxsimCpu's use of native BLAS libraries (Accelerate/OpenBLAS) and SIMD instructions.
 
 ### Performance Summary
 
