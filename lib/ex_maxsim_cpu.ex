@@ -138,7 +138,6 @@ defmodule ExMaxsimCpu do
     Nx.from_binary(scores_bin, :f32)
   end
 
-
   # Private helpers
 
   defp validate_query_shape(query) do
