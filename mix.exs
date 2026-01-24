@@ -2,7 +2,7 @@ defmodule ExMaxsimCpu.MixProject do
   use Mix.Project
 
   @version "0.3.0"
-  @source_url "https://github.com/mixedbread-ai/maxsim-cpu"
+  @source_url "https://github.com/goodhamgupta/ex_maxsim_cpu/"
 
   def project do
     [
